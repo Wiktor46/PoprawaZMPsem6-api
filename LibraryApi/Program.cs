@@ -167,6 +167,7 @@ using (var scope = app.Services.CreateScope())
     await EnsureColumnExistsAsync(db, "Users", "FullName", "TEXT NULL");
     await EnsureColumnExistsAsync(db, "BookLoans", "DueDate", "TEXT NOT NULL DEFAULT ''");
 
+    // Tworzenie domyślnego konta administratora
     if (!await db.Users.AnyAsync())
     {
         db.Users.Add(new User
@@ -177,6 +178,49 @@ using (var scope = app.Services.CreateScope())
             FullName = "Administrator",
             CreatedAt = DateTime.UtcNow
         });
+        await db.SaveChangesAsync();
+    }
+
+    // Automatyczne wypełnianie bazy testowymi książkami
+    if (!await db.Books.AnyAsync())
+    {
+        db.Books.AddRange(
+            new Book
+            {
+                Title = "Wiedźmin: Ostatnie Życzenie",
+                Author = "Andrzej Sapkowski",
+                ISBN = "978-83-7578-063-5",
+                IsAvailable = true
+            },
+            new Book
+            {
+                Title = "Lalka",
+                Author = "Bolesław Prus",
+                ISBN = "978-83-07-03123-1",
+                IsAvailable = true
+            },
+            new Book
+            {
+                Title = "Pragmatyczny Programista",
+                Author = "Andrew Hunt, David Thomas",
+                ISBN = "978-83-283-9111-6",
+                IsAvailable = false // Niedostępna na start - do testowania rezerwacji
+            },
+            new Book
+            {
+                Title = "Czysty Kod (Clean Code)",
+                Author = "Robert C. Martin",
+                ISBN = "978-83-246-2188-0",
+                IsAvailable = true
+            },
+            new Book
+            {
+                Title = "Diuna",
+                Author = "Frank Herbert",
+                ISBN = "978-83-8188-250-7",
+                IsAvailable = false // Niedostępna na start - do testowania rezerwacji
+            }
+        );
         await db.SaveChangesAsync();
     }
 }
