@@ -350,10 +350,11 @@ books.MapGet("/{id:int}", async (int id, LibraryDbContext db) =>
     });
 });
 
-books.MapPost("/", async (Book book, LibraryDbContext db) =>
+books.MapPost("/", async (Book book, LibraryDbContext db, IHubContext<NotificationHub> hubContext) =>
 {
     db.Books.Add(book);
     await db.SaveChangesAsync();
+    await hubContext.Clients.All.SendAsync("CatalogUpdated");
     return Results.Created($"/api/books/{book.Id}", book);
 }).RequireAuthorization("AdminOnly");
 
@@ -383,6 +384,7 @@ books.MapPut("/{id:int}", async (
     }
 
     await db.SaveChangesAsync();
+    await hubContext.Clients.All.SendAsync("CatalogUpdated");
 
     if (reservationToNotify is not null)
         await SendBookAvailableNotificationAsync(hubContext, book, reservationToNotify);
@@ -390,7 +392,7 @@ books.MapPut("/{id:int}", async (
     return Results.NoContent();
 }).RequireAuthorization("AdminOnly");
 
-books.MapDelete("/{id:int}", async (int id, LibraryDbContext db) =>
+books.MapDelete("/{id:int}", async (int id, LibraryDbContext db, IHubContext<NotificationHub> hubContext) =>
 {
     var book = await db.Books.FindAsync(id);
     if (book is null)
@@ -398,6 +400,7 @@ books.MapDelete("/{id:int}", async (int id, LibraryDbContext db) =>
 
     db.Books.Remove(book);
     await db.SaveChangesAsync();
+    await hubContext.Clients.All.SendAsync("CatalogUpdated");
     return Results.NoContent();
 }).RequireAuthorization("AdminOnly");
 
@@ -449,6 +452,7 @@ books.MapPost("/{id:int}/checkout", async (
 
     var message = $"Book '{book.Title}' has been checked out online by {borrower.FullName ?? borrower.Email}.";
     await hubContext.Clients.All.SendAsync("ReceiveNotification", message);
+    await hubContext.Clients.All.SendAsync("CatalogUpdated");
 
     return Results.Ok(new
     {
@@ -512,6 +516,7 @@ books.MapPost("/{id:int}/checkout-admin", async (
 
     var message = $"Book '{book.Title}' checked out to {borrower.FullName ?? borrower.Email} by Librarian.";
     await hubContext.Clients.All.SendAsync("ReceiveNotification", message);
+    await hubContext.Clients.All.SendAsync("CatalogUpdated");
 
     return Results.Ok(new
     {
@@ -563,6 +568,7 @@ books.MapPost("/{id:int}/return", async (
         reservationToNotify.NotifiedAt = DateTime.UtcNow;
 
     await db.SaveChangesAsync();
+    await hubContext.Clients.All.SendAsync("CatalogUpdated");
 
     if (reservationToNotify is not null)
         await SendBookAvailableNotificationAsync(hubContext, book, reservationToNotify);
@@ -583,7 +589,11 @@ books.MapPost("/{id:int}/return", async (
     });
 }).RequireAuthorization();
 
-books.MapPost("/{id:int}/reserve", async (int id, LibraryDbContext db, ClaimsPrincipal user) =>
+books.MapPost("/{id:int}/reserve", async (
+    int id, 
+    LibraryDbContext db, 
+    IHubContext<NotificationHub> hubContext,
+    ClaimsPrincipal user) =>
 {
     var userId = GetUserId(user);
     if (userId is null)
@@ -620,6 +630,7 @@ books.MapPost("/{id:int}/reserve", async (int id, LibraryDbContext db, ClaimsPri
 
     db.BookReservations.Add(reservation);
     await db.SaveChangesAsync();
+    await hubContext.Clients.All.SendAsync("CatalogUpdated");
 
     return Results.Created($"/api/reservations/{reservation.Id}", new
     {
@@ -898,7 +909,7 @@ static string GenerateJwtToken(User user, IConfiguration config)
         issuer: config["Jwt:Issuer"],
         audience: config["Jwt:Audience"],
         claims: claims,
-        expires: DateTime.UtcNow.AddHours(8),
+        expires: DateTime.UtcNow.AddSeconds(7200), //moszna było godziny, ale siem testowało, więc czemu nie dać 7200 sekund, to pszeciesz 2 godziny. matematyka heh
         signingCredentials: credentials);
 
     return new JwtSecurityTokenHandler().WriteToken(token);
