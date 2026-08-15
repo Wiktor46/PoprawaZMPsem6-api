@@ -450,7 +450,7 @@ books.MapPost("/{id:int}/checkout", async (
 
     await db.SaveChangesAsync();
 
-    var message = $"Book '{book.Title}' has been checked out online by {borrower.FullName ?? borrower.Email}.";
+    var message = $"Książka '{book.Title}' została wypożyczona on-line przez {borrower.FullName ?? borrower.Email}.";
     await hubContext.Clients.All.SendAsync("ReceiveNotification", message);
     await hubContext.Clients.All.SendAsync("CatalogUpdated");
 
@@ -606,6 +606,12 @@ books.MapPost("/{id:int}/reserve", async (
     if (book.IsAvailable)
         return Results.BadRequest(new { message = "Book is available. Check it out instead of reserving." });
 
+    var hasActiveLoan = await db.BookLoans
+        .AnyAsync(l => l.BookId == id && l.UserId == userId.Value && l.ReturnedAt == null);
+
+    if (hasActiveLoan)
+        return Results.BadRequest(new { message = "Aktualnie posiadasz wypożyczoną tę książkę. Nie możesz jej zarezerwować." });
+
     var existingReservation = await db.BookReservations
         .FirstOrDefaultAsync(r =>
             r.BookId == id &&
@@ -614,7 +620,7 @@ books.MapPost("/{id:int}/reserve", async (
             r.FulfilledAt == null);
 
     if (existingReservation is not null)
-        return Results.Conflict(new { message = "You already have an active reservation for this book." });
+        return Results.Conflict(new { message = "Złożyłeś już rezerwację na tę pozycję.." });
 
     var position = await db.BookReservations
         .Where(r => r.BookId == id && r.CancelledAt == null && r.FulfilledAt == null)
@@ -890,7 +896,7 @@ static Task SendBookAvailableNotificationAsync(
             title = book.Title,
             author = book.Author,
             isbn = book.ISBN,
-            message = $"Your reserved book '{book.Title}' is now available."
+            message = $"Twoja rezerwacja, pozycja '{book.Title}' jest już dostępna!."
         });
 
 static string GenerateJwtToken(User user, IConfiguration config)
