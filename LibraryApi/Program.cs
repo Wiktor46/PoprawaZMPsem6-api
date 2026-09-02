@@ -55,7 +55,7 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.WithOrigins("http://localhost:5173")
+        policy.SetIsOriginAllowed(_ => true)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -204,7 +204,7 @@ using (var scope = app.Services.CreateScope())
                 Title = "Pragmatyczny Programista",
                 Author = "Andrew Hunt, David Thomas",
                 ISBN = "978-83-283-9111-6",
-                IsAvailable = false // Niedostępna na start - do testowania rezerwacji
+                IsAvailable = false
             },
             new Book
             {
@@ -218,7 +218,7 @@ using (var scope = app.Services.CreateScope())
                 Title = "Diuna",
                 Author = "Frank Herbert",
                 ISBN = "978-83-8188-250-7",
-                IsAvailable = false // Niedostępna na start - do testowania rezerwacji
+                IsAvailable = false
             }
         );
         await db.SaveChangesAsync();
@@ -243,7 +243,7 @@ var auth = app.MapGroup("/api/auth").WithTags("Auth");
 auth.MapPost("/register", async (RegisterRequest request, LibraryDbContext db) =>
 {
     if (await db.Users.AnyAsync(u => u.Email == request.Email))
-        return Results.Conflict(new { message = "Email already registered." });
+        return Results.Conflict(new { message = "Ten adres e-mail jest już zarejestrowany." });
 
     var user = new User
     {
@@ -289,14 +289,14 @@ users.MapGet("/", async (LibraryDbContext db, bool? isOffline) =>
 users.MapPost("/offline", async (CreateOfflineUserRequest request, LibraryDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(request.FullName))
-        return Results.BadRequest(new { message = "Full name is required for offline readers." });
+        return Results.BadRequest(new { message = "Imię i nazwisko są wymagane dla czytelnika off-line." });
 
     var email = !string.IsNullOrWhiteSpace(request.Email)
         ? request.Email
         : $"offline_{Guid.NewGuid().ToString("N")[..8]}@library.local";
 
     if (await db.Users.AnyAsync(u => u.Email == email))
-        return Results.Conflict(new { message = "Email/Identifier already registered." });
+        return Results.Conflict(new { message = "Ten e-mail lub identyfikator jest już zarejestrowany." });
 
     var user = new User
     {
@@ -420,7 +420,7 @@ books.MapPost("/{id:int}/checkout", async (
         return Results.NotFound();
 
     if (!book.IsAvailable)
-        return Results.BadRequest(new { message = "Book is not available." });
+        return Results.BadRequest(new { message = "Książka nie jest obecnie dostępna." });
 
     var borrower = await db.Users.FindAsync(userId.Value);
     if (borrower is null)
@@ -480,14 +480,14 @@ books.MapPost("/{id:int}/checkout-admin", async (
 {
     var book = await db.Books.FindAsync(id);
     if (book is null)
-        return Results.NotFound(new { message = "Book not found." });
+        return Results.NotFound(new { message = "Nie znaleziono pozycji w katalogu." });
 
     if (!book.IsAvailable)
-        return Results.BadRequest(new { message = "Book is not available." });
+        return Results.BadRequest(new { message = "Książka nie jest obecnie dostępna." });
 
     var borrower = await db.Users.FindAsync(request.UserId);
     if (borrower is null)
-        return Results.BadRequest(new { message = "Borrower user not found." });
+        return Results.BadRequest(new { message = "Nie znaleziono wskazanego czytelnika." });
 
     book.IsAvailable = false;
 
@@ -514,7 +514,7 @@ books.MapPost("/{id:int}/checkout-admin", async (
 
     await db.SaveChangesAsync();
 
-    var message = $"Book '{book.Title}' checked out to {borrower.FullName ?? borrower.Email} by Librarian.";
+    var message = $"Książka '{book.Title}' została wypożyczona czytelnikowi {borrower.FullName ?? borrower.Email} przez bibliotekarza.";
     await hubContext.Clients.All.SendAsync("ReceiveNotification", message);
     await hubContext.Clients.All.SendAsync("CatalogUpdated");
 
@@ -554,7 +554,7 @@ books.MapPost("/{id:int}/return", async (
         .FirstOrDefaultAsync(l => l.BookId == id && l.ReturnedAt == null);
 
     if (activeLoan is null)
-        return Results.BadRequest(new { message = "Book is not currently borrowed." });
+        return Results.BadRequest(new { message = "Ta książka nie jest obecnie wypożyczona." });
 
     var isAdmin = user.IsInRole("Admin");
     if (!isAdmin && activeLoan.UserId != userId.Value)
@@ -604,7 +604,7 @@ books.MapPost("/{id:int}/reserve", async (
         return Results.NotFound();
 
     if (book.IsAvailable)
-        return Results.BadRequest(new { message = "Book is available. Check it out instead of reserving." });
+        return Results.BadRequest(new { message = "Książka jest dostępna. Wypożycz ją zamiast rezerwować." });
 
     var hasActiveLoan = await db.BookLoans
         .AnyAsync(l => l.BookId == id && l.UserId == userId.Value && l.ReturnedAt == null);
@@ -620,7 +620,7 @@ books.MapPost("/{id:int}/reserve", async (
             r.FulfilledAt == null);
 
     if (existingReservation is not null)
-        return Results.Conflict(new { message = "Złożyłeś już rezerwację na tę pozycję.." });
+        return Results.Conflict(new { message = "Masz już aktywną rezerwację na tę pozycję." });
 
     var position = await db.BookReservations
         .Where(r => r.BookId == id && r.CancelledAt == null && r.FulfilledAt == null)
@@ -896,7 +896,7 @@ static Task SendBookAvailableNotificationAsync(
             title = book.Title,
             author = book.Author,
             isbn = book.ISBN,
-            message = $"Twoja rezerwacja, pozycja '{book.Title}' jest już dostępna!."
+            message = $"Twoja zarezerwowana książka '{book.Title}' jest już dostępna do odbioru!"
         });
 
 static string GenerateJwtToken(User user, IConfiguration config)
@@ -915,7 +915,7 @@ static string GenerateJwtToken(User user, IConfiguration config)
         issuer: config["Jwt:Issuer"],
         audience: config["Jwt:Audience"],
         claims: claims,
-        expires: DateTime.UtcNow.AddSeconds(7200), //moszna było godziny, ale siem testowało, więc czemu nie dać 7200 sekund, to pszeciesz 2 godziny. matematyka heh
+        expires: DateTime.UtcNow.AddSeconds(7200),
         signingCredentials: credentials);
 
     return new JwtSecurityTokenHandler().WriteToken(token);
@@ -925,3 +925,5 @@ record RegisterRequest(string Email, string Password, string? FullName);
 record CreateOfflineUserRequest(string FullName, string? Email);
 record LoginRequest(string Email, string Password);
 record AdminCheckoutRequest(int UserId, int? Days);
+
+public partial class Program { }
